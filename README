@@ -1,0 +1,2 @@
+Allows you to write Wye workers in Go.  Very alpha.  And you still have to
+write some Python to call the workers.
