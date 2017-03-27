@@ -95,7 +95,7 @@ func (w *QueueWorker) Initialise(outputs []string) error {
 	}
 
 	w.client = redis.NewClient(&redis.Options{
-		Addr:     getenv("REDIS_SERVER", "localhost:6379"),
+		Addr:     getenv("REDIS_SERVER", "redis:6379"),
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
