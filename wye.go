@@ -77,7 +77,7 @@ type QueueWorker struct {
 func (w *QueueWorker) CreateInput() string {
 
 	u := uuid.New().String()
-	return u
+	return "q:" + u
 
 }
 
