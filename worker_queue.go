@@ -2,23 +2,34 @@
 package wye
 
 import (
-	zmq "github.com/pebbe/zmq4"
+	"os"
+	"gopkg.in/redis.v5"
 )
 
+func getenv(env string, def string) string {
+	s := os.Getenv(env)
+	if s == "" {
+		return def
+	} else {
+		return s
+	}
+}
+
 type WorkerQueue struct {
-	sockets []*zmq.Socket
+	endpoints []string
+	client   *redis.Client
 	cur int
 }
 
 func (w *WorkerQueue) Send(msg []uint8) error {
 
-	_, err := w.sockets[w.cur].SendBytes(msg, 0)
+	err := w.client.RPush(w.endpoints[w.cur], msg).Err()
 	if err != nil {
 		return err
 	}
 
 	w.cur = w.cur + 1
-	if w.cur >= len(w.sockets) {
+	if w.cur >= len(w.endpoints) {
 		w.cur = 0
 	}
 
@@ -30,22 +41,13 @@ func NewWorkerQueue(endpoints []string) (*WorkerQueue, error) {
 
 	w := new(WorkerQueue)
 
-	for _, v := range(endpoints) {
-		var socket *zmq.Socket
-		var err error
+	w.client = redis.NewClient(&redis.Options{
+		Addr:     getenv("REDIS_SERVER", "localhost:6379"),
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
 
-		socket, err = zmq.NewSocket(zmq.PUSH)
-		if err != nil {
-			return nil, err
-		}
-
-		err = socket.Connect(v)
-		if err != nil {
-			return nil, err
-		}
-
-		w.sockets = append(w.sockets, socket)
-	}
+	w.endpoints = endpoints
 
 	w.cur = 0
 

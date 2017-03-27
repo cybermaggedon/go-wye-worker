@@ -5,7 +5,9 @@ import (
 	"strings"
 	"os"
 	"fmt"
-	zmq "github.com/pebbe/zmq4"
+	"time"
+	"gopkg.in/redis.v5"
+	"github.com/google/uuid"
 )
 
 type EventHandler interface {
@@ -68,45 +70,19 @@ func (w *Worker) Send(name string, msg []uint8) {
 
 type QueueWorker struct {
 	Worker
-	in *zmq.Socket
-	in_address string
+	client *redis.Client
+	queue string
 }
 
-func (w *QueueWorker) CreateInput(endpoint string) (*zmq.Socket, string, error) {
+func (w *QueueWorker) CreateInput() string {
 
-	var socket *zmq.Socket
-	var err error
-	socket, err = zmq.NewSocket(zmq.PULL)
-	if err != nil {
-		return nil, "", err
-	}
-
-	err = socket.Bind(endpoint)
-	if err != nil {
-		return nil, "", err
-	}
-	
-	addr, err := socket.GetLastEndpoint()
-	if err != nil {
-		return nil, "", err
-	}
-	
-	return socket, addr, nil
+	u := uuid.New().String()
+	return u
 
 }
 
 type Handler interface {
 	Handle(message []uint8, w *Worker) error
-}
-
-func (w *QueueWorker) Receive(h Handler) error {
-	msg, err := w.in.RecvBytes(0)
-	if (err != nil) {
-		return err
-	}
-
-	return h.Handle(msg, &(w.Worker))
-
 }
 
 func (w *QueueWorker) Initialise(outputs []string) error {
@@ -118,17 +94,23 @@ func (w *QueueWorker) Initialise(outputs []string) error {
 		return err
 	}
 
+	w.client = redis.NewClient(&redis.Options{
+		Addr:     getenv("REDIS_SERVER", "localhost:6379"),
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
 	w.out, err = w.ParseOutputs(outputs)
 	if err != nil {
 		return err
 	}
 
-	w.in, w.in_address, err = w.CreateInput("tcp://*:*")
+	w.queue = w.CreateInput()
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(w.ctrl, "INPUT:input:%s\n", w.in_address)
+	fmt.Fprintf(w.ctrl, "INPUT:input:%s\n", w.queue)
 	if err != nil {
 		return err
 	}
@@ -140,8 +122,24 @@ func (w *QueueWorker) Initialise(outputs []string) error {
 }
 
 func (w *QueueWorker) Run(h Handler) {
-	r := zmq.NewReactor()
-	r.AddSocket(w.in, zmq.POLLIN,
-		func(s zmq.State) error { return w.Receive(h) })
-	r.Run(-1)
+
+	for {
+
+		val, err := w.client.BLPop(0, w.queue).Result()
+
+		if err == nil {
+			h.Handle([]byte(val[1]), &(w.Worker))
+			continue
+		}
+
+		if err == redis.Nil {
+			continue
+		}
+
+		fmt.Println("Error: %s\n", err.Error())
+
+		time.Sleep(1 * time.Second)
+
+	}
+
 }
