@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 	"gopkg.in/redis.v5"
-	"github.com/google/uuid"
 )
 
 type EventHandler interface {
@@ -74,18 +73,11 @@ type QueueWorker struct {
 	queue string
 }
 
-func (w *QueueWorker) CreateInput() string {
-
-	u := uuid.New().String()
-	return "q:" + u
-
-}
-
 type Handler interface {
 	Handle(message []uint8, w *Worker) error
 }
 
-func (w *QueueWorker) Initialise(outputs []string) error {
+func (w *QueueWorker) Initialise(input string, outputs []string) error {
 
 	w.ctrl = os.NewFile(3, "fd3")
 
@@ -105,10 +97,7 @@ func (w *QueueWorker) Initialise(outputs []string) error {
 		return err
 	}
 
-	w.queue = w.CreateInput()
-	if err != nil {
-		return err
-	}
+	w.queue = "q:" + input
 
 	fmt.Fprintf(w.ctrl, "INPUT:input:%s\n", w.queue)
 	if err != nil {
