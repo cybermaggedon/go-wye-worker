@@ -69,7 +69,6 @@ func (w *Worker) Send(name string, msg []uint8) {
 
 type QueueWorker struct {
 	Worker
-	client *redis.Client
 	queue string
 }
 
@@ -85,12 +84,6 @@ func (w *QueueWorker) Initialise(input string, outputs []string) error {
 	if err != nil {
 		return err
 	}
-
-	w.client = redis.NewClient(&redis.Options{
-		Addr:     getenv("REDIS_SERVER", "redis:6379"),
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
 
 	w.out, err = w.ParseOutputs(outputs)
 	if err != nil {
@@ -110,25 +103,53 @@ func (w *QueueWorker) Initialise(input string, outputs []string) error {
 
 }
 
-func (w *QueueWorker) Run(h Handler) {
+func (w *QueueWorker) qReader(ch chan []uint8) {
+
+	client := redis.NewClient(&redis.Options{
+		Addr:     getenv("REDIS_SERVER", "redis:6379"),
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
 
 	for {
 
-		val, err := w.client.BLPop(0, w.queue).Result()
+		val, err := client.BLPop(0, w.queue).Result()
 
 		if err == nil {
-			h.Handle([]byte(val[1]), &(w.Worker))
+			bts := []byte(val[1])
+			ch <- bts
 			continue
 		}
 
+		// No message.  It's blocking, so...
+		// FIXME: Case doesn't happen?
 		if err == redis.Nil {
 			continue
 		}
 
-		fmt.Println("Error: %s\n", err.Error())
+		client.Close()
 
-		time.Sleep(1 * time.Second)
+		time.Sleep(5 * time.Second)
 
+		client = redis.NewClient(&redis.Options{
+			Addr:     getenv("REDIS_SERVER", "redis:6379"),
+			Password: "", // no password set
+			DB:       0,  // use default DB
+		})
+
+	}
+
+}
+
+func (w *QueueWorker) Run(h Handler) {
+
+	ch := make(chan []uint8, 10)
+
+	go w.qReader(ch)
+
+	for {
+		val := <- ch
+		h.Handle(val, &(w.Worker))
 	}
 
 }
